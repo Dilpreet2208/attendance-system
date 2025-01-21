@@ -50,55 +50,38 @@ router.post('/mark', async (req, res) => {
 
     const now = new Date();
     const istDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const date = istDate.toISOString().split('T')[0];  // YYYY-MM-DD
+    const date = istDate.toISOString().split('T')[0]; // YYYY-MM-DD
     const time = istDate.toTimeString().split(' ')[0]; // HH:MM:SS
 
     console.log(`Marking attendance for username: ${username} on date: ${date} at time: ${time}`);
 
-    // Check if attendance is already marked for today
+    // Check if attendance is already marked for today in the database
     const existingRecord = await Attendance.findOne({ where: { username, date } });
     if (existingRecord) {
       return res.status(400).send('Attendance already marked for today');
     }
 
-    // Save the attendance record
+    // Save the attendance record to the database
     await Attendance.create({ name, username, date, loginTime: time });
 
     // Create or load the Excel file for today's attendance
     const { workbook, worksheet, filePath } = await createOrLoadWorkbook(date);
-    console.log("workbook loaded")
-    // Check if a row already exists for the user
-    let rowFound = false;
-    worksheet.eachRow((row) => {
-      if (row.getCell('B').value === username && row.getCell('C').value === date) {
-        rowFound = true;
-        return false; // Exit the loop after finding a matching row
-      }
+
+    // Debug: Print existing worksheet rows
+    console.log('Existing rows in worksheet:');
+    worksheet.eachRow((row, rowIndex) => {
+      console.log(`Row ${rowIndex}: ${row.values}`);
     });
 
-    if (!rowFound) {
-      console.log("name ", name)
-      // Add a new row for the user's attendance
-      worksheet.addRow({
-        name,
-        username,
-        date,
-        loginTime: time,
-        signOffTime: '', // Empty sign-off time for now
-      });
-      console.log('row added')
-      worksheet.eachRow((row) => {
-        console.log(`Name: ${row.getCell('A').value}`); 
-        console.log(`Username: ${row.getCell('B').value}`);
-        console.log(`Date: ${row.getCell('C').value}`);
-        console.log(`Login Time: ${row.getCell('D').value}`);
-        console.log(`Sign-Off Time: ${row.getCell('E').value}`);
-      });
-    }
+    // Append the new row directly
+    const rowCount = worksheet.rowCount;
+    const newRow = worksheet.getRow(rowCount + 1); // Get a new row
+    newRow.values = [name, username, date, time, '']; // Assign values to the row
+    newRow.commit(); // Commit the row changes to the worksheet
 
     // Save the updated workbook
     await workbook.xlsx.writeFile(filePath);
-    console.log('file saved')
+    console.log('Attendance saved to Excel file:', filePath);
 
     res.send('Attendance marked successfully');
   } catch (error) {
@@ -117,7 +100,7 @@ router.post('/signoff', async (req, res) => {
 
     const now = new Date();
     const istDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const date = istDate.toISOString().split('T')[0];  // YYYY-MM-DD
+    const date = istDate.toISOString().split('T')[0]; // YYYY-MM-DD
     const time = istDate.toTimeString().split(' ')[0]; // HH:MM:SS
 
     // Find the attendance record for today
@@ -126,7 +109,7 @@ router.post('/signoff', async (req, res) => {
       return res.status(400).send('No attendance record found');
     }
 
-    // Update the sign-off time
+    // Update the sign-off time in the database
     record.signOffTime = time;
     await record.save();
 
@@ -145,11 +128,13 @@ router.post('/signoff', async (req, res) => {
       return res.send('Mark attendance first');
     } else {
       // Update the existing row with the sign-off time
-      row.getCell('E').value = time;  // Column E corresponds to Sign-Off Time
+      row.getCell('E').value = time; // Column E corresponds to Sign-Off Time
+      row.commit(); // Commit the changes to the row
     }
 
-    // Save the updated workbook (append the sign-off time)
+    // Save the updated workbook
     await workbook.xlsx.writeFile(filePath);
+    console.log('Sign-off time saved to Excel file:', filePath);
 
     res.send('Sign off marked');
   } catch (error) {
@@ -159,5 +144,6 @@ router.post('/signoff', async (req, res) => {
     }
   }
 });
+
 
 module.exports = router;
